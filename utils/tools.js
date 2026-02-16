@@ -14,13 +14,25 @@ function md5(str) {
 }
 
 function getHash(params, appSecret) {
+  // 按照虎皮椒文档的签名算法
   const sortedParams = Object.keys(params)
-    .filter(key => params[key] && key !== 'hash')
-    .sort()
+    .filter(key => {
+      // 过滤掉空值和hash本身
+      const value = params[key];
+      return value !== null && value !== undefined && value !== '' && key !== 'hash';
+    })
+    .sort() // 字典序排序
     .map(key => `${key}=${params[key]}`)
     .join('&');
+    
   const stringSignTemp = sortedParams + appSecret;
-  return md5(stringSignTemp);
+  const hash = md5(stringSignTemp);
+  
+  // 调试用（生产环境可以删除）
+  // console.log('签名字符串:', stringSignTemp);
+  // console.log('签名结果:', hash);
+  
+  return hash;
 }
 
 module.exports = { nowDate, uuid, md5, getHash };

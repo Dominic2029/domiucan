@@ -4,15 +4,17 @@
   "description": "生产级 Shopify AI 文章生成器",
   "private": true,
   "dependencies": {
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-router-dom": "^6.20.0",
     "axios": "^1.6.2",
-    "react-quill": "^2.0.0",
+    "crypto-js": "^4.2.0",
+    "dayjs": "^1.11.10",
     "js-cookie": "^3.0.5",
     "jwt-decode": "^4.0.0",
+    "md5": "^2.3.0",
     "qs": "^6.11.2",
-    "dayjs": "^1.11.10"
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-quill": "^2.0.0",
+    "react-router-dom": "^6.20.0"
   },
   "devDependencies": {
     "@types/react": "^18.2.43",

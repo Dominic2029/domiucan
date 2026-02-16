@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useAppContext } from '../context/AppContext'
-import { generateShopifyAuthUrl, extractShopifyCode, fetchShopifyProducts } from '../utils/shopify'
+import { generateShopifyAuthUrl, extractShopifyCallback, fetchShopifyProducts } from '../utils/shopify'
 import { testApiKey } from '../utils/deepseek'
 import Button from '../components/Button'
 
@@ -14,9 +14,18 @@ function Settings() {
 
   // 处理 Shopify 授权回调
   useEffect(() => {
-    const code = extractShopifyCode()
-    if (code) {
-      handleShopifyCallback(code)
+    const callback = extractShopifyCallback()
+    if (callback) {
+      if (callback.error) {
+        // 用户拒绝授权或其他错误
+        alert(`Shopify 授权失败: ${callback.errorDescription || callback.error}`)
+        // 清除待处理的授权信息
+        localStorage.removeItem('shopify_auth_pending')
+        window.history.replaceState({}, document.title, '/settings')
+      } else if (callback.code) {
+        // 有授权码，处理回调
+        handleShopifyCallback(callback.code, callback.shopDomain)
+      }
     }
   }, [])
 
@@ -33,18 +42,41 @@ function Settings() {
       return
     }
 
-    const authUrl = generateShopifyAuthUrl(shopDomain)
-    window.location.href = authUrl
+    try {
+      // 保存 shopDomain 到 localStorage，以防回调时丢失
+      localStorage.setItem('shopify_auth_pending', JSON.stringify({ shopDomain }))
+      
+      const authUrl = generateShopifyAuthUrl(shopDomain)
+      window.location.href = authUrl
+    } catch (error) {
+      alert(error.message || '生成授权链接失败')
+      console.error('Shopify 授权错误:', error)
+    }
   }
 
   // 处理 Shopify 授权回调（模拟）
-  const handleShopifyCallback = async (code) => {
+  const handleShopifyCallback = async (code, callbackShopDomain) => {
     setShopifyLoading(true)
     try {
+      // 使用回调中的 shopDomain，如果没有则使用当前输入的
+      const finalShopDomain = callbackShopDomain || shopDomain
+      
+      if (!finalShopDomain) {
+        throw new Error('无法获取店铺域名，请重新授权')
+      }
+
       // TODO: 替换为真实 Shopify OAuth Token 交换
+      // 注意：真实的 OAuth Token 交换需要在后端完成，因为需要 Client Secret
       // const response = await fetch('YOUR_BACKEND_API/shopify/oauth', {
       //   method: 'POST',
-      //   body: JSON.stringify({ code, shop: shopDomain }),
+      //   headers: {
+      //     'Content-Type': 'application/json',
+      //   },
+      //   body: JSON.stringify({ 
+      //     code, 
+      //     shop: finalShopDomain,
+      //     redirect_uri: `${window.location.origin}/settings?shopify_callback=1`
+      //   }),
       // })
       // const { access_token } = await response.json()
 
@@ -53,14 +85,18 @@ function Settings() {
 
       // 保存授权信息
       const authData = {
-        shopDomain,
+        shopDomain: finalShopDomain,
         accessToken: mockAccessToken,
+        isAuthorized: true,
       }
       localStorage.setItem('shopify_auth', JSON.stringify(authData))
       dispatch({
         type: 'SET_SHOPIFY_AUTH',
         payload: authData,
       })
+
+      // 更新 shopDomain 状态
+      setShopDomain(finalShopDomain)
 
       // 获取产品列表
       const products = await fetchShopifyProducts(mockAccessToken)
@@ -69,11 +105,14 @@ function Settings() {
         payload: products,
       })
 
-      // 清除 URL 参数
+      // 清除待处理的授权信息和 URL 参数
+      localStorage.removeItem('shopify_auth_pending')
       window.history.replaceState({}, document.title, '/settings')
     } catch (error) {
       console.error('Shopify 授权失败:', error)
-      alert('授权失败，请重试')
+      alert(error.message || '授权失败，请重试')
+      // 清除待处理的授权信息
+      localStorage.removeItem('shopify_auth_pending')
     } finally {
       setShopifyLoading(false)
     }

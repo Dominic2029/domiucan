@@ -10,9 +10,21 @@ const SHOPIFY_CLIENT_ID = import.meta.env.VITE_SHOPIFY_CLIENT_ID || ''
  * @returns {string} 授权 URL
  */
 export function generateShopifyAuthUrl(shopDomain) {
+  // 检查 Client ID 配置
+  if (!SHOPIFY_CLIENT_ID) {
+    throw new Error(
+      'Shopify Client ID 未配置，请在 .env 文件中配置 VITE_SHOPIFY_CLIENT_ID'
+    )
+  }
+
   const redirectUri = `${window.location.origin}/settings?shopify_callback=1`
   const scopes = 'read_products,write_blogs'
-  const state = btoa(JSON.stringify({ timestamp: Date.now() })) // 简单的 state 参数
+  
+  // 在 state 中包含 shopDomain，以便回调时使用
+  const state = btoa(JSON.stringify({ 
+    timestamp: Date.now(),
+    shopDomain: shopDomain 
+  }))
 
   const authUrl = `https://${shopDomain}/admin/oauth/authorize?client_id=${SHOPIFY_CLIENT_ID}&scope=${scopes}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${state}`
   
@@ -20,12 +32,46 @@ export function generateShopifyAuthUrl(shopDomain) {
 }
 
 /**
- * 从 URL 参数中提取 Shopify 授权码
- * @returns {string|null} 授权码
+ * 从 URL 参数中提取 Shopify 授权码和 shopDomain
+ * @returns {Object|null} { code: string, shopDomain: string, error: string } 或 null
  */
-export function extractShopifyCode() {
+export function extractShopifyCallback() {
   const params = new URLSearchParams(window.location.search)
-  return params.get('code')
+  const code = params.get('code')
+  const error = params.get('error')
+  const errorDescription = params.get('error_description')
+  const state = params.get('state')
+
+  // 解析 state 获取 shopDomain
+  let shopDomain = null
+  if (state) {
+    try {
+      const stateData = JSON.parse(atob(state))
+      shopDomain = stateData.shopDomain
+    } catch (e) {
+      console.error('解析 state 参数失败:', e)
+    }
+  }
+
+  // 如果从 state 中获取不到，尝试从 localStorage 获取
+  if (!shopDomain) {
+    try {
+      const savedAuth = localStorage.getItem('shopify_auth_pending')
+      if (savedAuth) {
+        const authData = JSON.parse(savedAuth)
+        shopDomain = authData.shopDomain
+      }
+    } catch (e) {
+      console.error('从 localStorage 获取 shopDomain 失败:', e)
+    }
+  }
+
+  return {
+    code,
+    shopDomain,
+    error: error || null,
+    errorDescription: errorDescription || null,
+  }
 }
 
 /**

@@ -10,63 +10,71 @@ function PaymentResult() {
   const navigate = useNavigate()
   const [searchParams] = useSearchParams()
   const { dispatch } = useAppContext()
-  const [status, setStatus] = useState('checking') // checking | success | failed
+  const [status, setStatus] = useState('checking')
   const [orderId, setOrderId] = useState(null)
   const [packageType, setPackageType] = useState(null)
 
   useEffect(() => {
-    const orderIdParam = searchParams.get('order_id')
+    const orderIdParam = searchParams.get('trade_order_id') || searchParams.get('order_id')
     const packageParam = searchParams.get('package')
     const statusParam = searchParams.get('status')
 
-    if (orderIdParam && packageParam) {
+    if (orderIdParam) {
       setOrderId(orderIdParam)
-      setPackageType(packageParam)
       
-      if (statusParam === 'success') {
-        // 模拟查询支付状态（实际应调用真实接口）
-        checkPaymentStatus(orderIdParam, packageParam)
+      if (packageParam) {
+        setPackageType(packageParam)
       } else {
-        setStatus('failed')
+        const match = orderIdParam.match(/package[_-]?(\w+)/i)
+        if (match) {
+          setPackageType(match[1])
+        }
       }
+      
+      checkPaymentStatus(orderIdParam, packageParam)
     } else {
       setStatus('failed')
     }
   }, [searchParams])
 
-  // 查询支付状态
   const checkPaymentStatus = async (orderId, packageType) => {
     try {
-      // 轮询查询支付状态
       const maxAttempts = 10
       let attempts = 0
 
       const poll = async () => {
         attempts++
-        const result = await queryPaymentStatus(orderId)
-        
-        if (result.status === 'paid') {
-          // 支付成功，处理支付结果
-          const paymentInfo = handlePaymentSuccess(packageType, orderId)
+        try {
+          const result = await queryPaymentStatus(orderId)
           
-          // 更新全局状态
-          dispatch({
-            type: 'SET_PAYMENT_STATUS',
-            payload: {
-              isPaid: true,
-              packageType: paymentInfo.packageType,
-              expireTime: paymentInfo.expireTime,
-              remainingDays: paymentInfo.remainingDays,
-            },
-          })
+          if (result.status === 'paid') {
+            const finalPackageType = packageType || 'monthly'
+            
+            const paymentInfo = handlePaymentSuccess(finalPackageType, orderId)
+            
+            dispatch({
+              type: 'SET_PAYMENT_STATUS',
+              payload: {
+                isPaid: true,
+                packageType: paymentInfo.packageType,
+                expireTime: paymentInfo.expireTime,
+                remainingDays: paymentInfo.remainingDays,
+              },
+            })
 
-          setStatus('success')
-        } else if (result.status === 'pending' && attempts < maxAttempts) {
-          // 继续轮询（仅当状态为 pending 时）
-          setTimeout(poll, 2000)
-        } else {
-          // 支付失败或超时
-          setStatus('failed')
+            setStatus('success')
+          } else if (result.status === 'pending' && attempts < maxAttempts) {
+            setTimeout(poll, 2000)
+          } else {
+            setStatus('failed')
+          }
+        } catch (error) {
+          console.error('查询支付状态失败:', error)
+          if (attempts >= maxAttempts) {
+            setStatus('failed')
+          } else {
+            setTimeout(poll, 2000)
+          }
         }
       }
 

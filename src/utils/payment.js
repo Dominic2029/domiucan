@@ -6,10 +6,11 @@ import qs from 'qs'
 import dayjs from 'dayjs'
 import Cookies from 'js-cookie'
 import { jwtDecode } from 'jwt-decode'
+import CryptoJS from 'crypto-js'
 
 const MERCHANT_ID = import.meta.env.VITE_HUPIJIAO_MERCHANT_ID || ''
 const API_KEY = import.meta.env.VITE_HUPIJIAO_API_KEY || ''
-const API_BASE_URL = 'https://api.xunhupay.com' // 虎皮椒 API 地址
+const API_BASE_URL = 'https://api.xunhupay.com'
 
 /**
  * 套餐配置
@@ -33,12 +34,34 @@ export const PACKAGES = {
   lifetime: {
     name: '终身套餐',
     price: 100,
-    days: null, // 永久
+    days: null,
   },
 }
 
 /**
- * 创建支付订单
+ * 生成 MD5 签名
+ * @param {Object} params - 参数对象（不包含 hash）
+ * @param {string} apiKey - API密钥
+ * @returns {string} MD5 签名
+ */
+function generateSign(params, apiKey) {
+  const filteredParams = {}
+  Object.keys(params)
+    .filter(key => key !== 'hash' && params[key] !== null && params[key] !== '')
+    .sort()
+    .forEach(key => {
+      filteredParams[key] = params[key]
+    })
+  
+  const signString = Object.entries(filteredParams)
+    .map(([key, value]) => `${key}=${value}`)
+    .join('&') + apiKey
+  
+  return CryptoJS.MD5(signString).toString().toLowerCase()
+}
+
+/**
+ * 创建支付订单（通过后端 API）
  * @param {string} packageType - 套餐类型
  * @param {string} returnUrl - 支付成功回调 URL
  * @returns {Promise<string>} 支付链接
@@ -49,126 +72,107 @@ export async function createPaymentOrder(packageType, returnUrl) {
     throw new Error('无效的套餐类型')
   }
 
-  // TODO: 替换为真实虎皮椒 API 调用
-  // const params = {
-  //   version: '1.1',
-  //   lang: 'zh-cn',
-  //   plugins: 'xunhupay',
-  //   appid: MERCHANT_ID,
-  //   trade_order_id: `ORDER_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-  //   payment: 'wechat',
-  //   total_fee: packageInfo.price,
-  //   title: packageInfo.name,
-  //   time: Math.floor(Date.now() / 1000),
-  //   notify_url: `${window.location.origin}/api/payment/notify`,
-  //   return_url: returnUrl,
-  //   callback_url: returnUrl,
-  // }
-  //
-  // // 生成签名
-  // const signString = Object.keys(params)
-  //   .sort()
-  //   .map((key) => `${key}=${params[key]}`)
-  //   .join('&')
-  // const sign = md5(signString + API_KEY)
-  // params.hash = sign
-  //
-  // const response = await fetch(`${API_BASE_URL}/payment/do.html`, {
-  //   method: 'POST',
-  //   headers: {
-  //     'Content-Type': 'application/x-www-form-urlencoded',
-  //   },
-  //   body: qs.stringify(params),
-  // })
-  //
-  // const data = await response.json()
-  // if (data.errcode === 0) {
-  //   return data.url
-  // } else {
-  //   throw new Error(data.errmsg || '创建订单失败')
-  // }
+  try {
+    const response = await fetch('/api/payment/create', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        packageType,
+        returnUrl,
+      }),
+    })
 
-  // 模拟创建订单（实际使用时需替换）
-  // 注意：这是模拟实现，实际应跳转到真实支付页面
-  return new Promise((resolve, reject) => {
-    // 在开发环境中，需要用户确认是否模拟支付成功
-    const shouldMockPay = confirm(
-      `【开发模式】这是模拟支付流程\n\n` +
-      `套餐：${packageInfo.name}\n` +
-      `价格：¥${packageInfo.price}\n\n` +
-      `点击"确定"模拟支付成功，点击"取消"模拟支付失败`
-    )
-    
-    setTimeout(() => {
-      const mockOrderId = `ORDER_${Date.now()}`
-      if (shouldMockPay) {
-        // 模拟支付成功
-        const mockPaymentUrl = `/payment/result?order_id=${mockOrderId}&package=${packageType}&status=success`
-        resolve(mockPaymentUrl)
-      } else {
-        // 模拟支付失败
-        const mockPaymentUrl = `/payment/result?order_id=${mockOrderId}&package=${packageType}&status=failed`
-        resolve(mockPaymentUrl)
-      }
-    }, 500)
-  })
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('API 请求失败:', {
+        status: response.status,
+        statusText: response.statusText,
+        body: errorText,
+      })
+      throw new Error(`API 请求失败: ${response.status} ${response.statusText}`)
+    }
+
+    const contentType = response.headers.get('content-type')
+    if (!contentType || !contentType.includes('application/json')) {
+      const text = await response.text()
+      console.error('API 返回非 JSON 格式:', text)
+      throw new Error('API 返回格式错误，请稍后重试')
+    }
+
+    const data = await response.json()
+
+    if (data.success && data.url) {
+      return data.url
+    } else {
+      throw new Error(data.error || '创建订单失败')
+    }
+  } catch (error) {
+    if (error.name === 'SyntaxError' && error.message.includes('JSON')) {
+      console.error('JSON 解析错误:', error)
+      throw new Error('服务器返回数据格式错误，请稍后重试')
+    }
+    if (error.message) {
+      throw error
+    }
+    throw new Error(`支付接口调用失败: ${error.message || '网络错误'}`)
+  }
 }
 
 /**
- * 查询支付状态
+ * 查询支付状态（通过后端 API）
  * @param {string} orderId - 订单 ID
- * @returns {Promise<Object>} 支付状态
+ * @returns {Promise<Object>} 支付状态 { status: 'paid' | 'pending' | 'failed', ... }
  */
 export async function queryPaymentStatus(orderId) {
-  // TODO: 替换为真实虎皮椒 API 调用
-  // const params = {
-  //   version: '1.1',
-  //   lang: 'zh-cn',
-  //   plugins: 'xunhupay',
-  //   appid: MERCHANT_ID,
-  //   trade_order_id: orderId,
-  //   time: Math.floor(Date.now() / 1000),
-  // }
-  //
-  // const signString = Object.keys(params)
-  //   .sort()
-  //   .map((key) => `${key}=${params[key]}`)
-  //   .join('&')
-  // const sign = md5(signString + API_KEY)
-  // params.hash = sign
-  //
-  // const response = await fetch(`${API_BASE_URL}/payment/query.html`, {
-  //   method: 'POST',
-  //   headers: {
-  //     'Content-Type': 'application/x-www-form-urlencoded',
-  //   },
-  //   body: qs.stringify(params),
-  // })
-  //
-  // return await response.json()
+  try {
+    const response = await fetch('/api/payment/query', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        orderId,
+      }),
+    })
 
-  // 模拟查询（实际使用时需替换）
-  // 注意：这是模拟实现，实际应调用真实支付接口验证
-  return new Promise((resolve) => {
-    setTimeout(() => {
-      // 从 URL 参数中获取支付状态（模拟）
-      const urlParams = new URLSearchParams(window.location.search)
-      const statusParam = urlParams.get('status')
-      
-      // 只有明确标记为 success 时才返回 paid，否则返回 pending 或 failed
-      if (statusParam === 'success') {
-        resolve({
-          status: 'paid',
-          trade_order_id: orderId,
-        })
-      } else {
-        resolve({
-          status: 'pending',
-          trade_order_id: orderId,
-        })
+    if (!response.ok) {
+      const errorText = await response.text()
+      console.error('查询 API 请求失败:', {
+        status: response.status,
+        statusText: response.statusText,
+        body: errorText,
+      })
+      throw new Error(`查询请求失败: ${response.status} ${response.statusText}`)
+    }
+
+    const contentType = response.headers.get('content-type')
+    if (!contentType || !contentType.includes('application/json')) {
+      const text = await response.text()
+      console.error('查询 API 返回非 JSON 格式:', text)
+      throw new Error('查询接口返回格式错误，请稍后重试')
+    }
+
+    const data = await response.json()
+
+    if (data.success) {
+      return {
+        status: data.status,
+        trade_order_id: data.trade_order_id || orderId,
+        total_fee: data.total_fee,
+        paid_at: data.paid_at,
       }
-    }, 500)
-  })
+    } else {
+      throw new Error(data.error || '查询支付状态失败')
+    }
+  } catch (error) {
+    if (error.name === 'SyntaxError' && error.message.includes('JSON')) {
+      console.error('JSON 解析错误:', error)
+      throw new Error('查询接口返回数据格式错误，请稍后重试')
+    }
+    throw new Error(`查询支付状态失败: ${error.message || '网络错误'}`)
+  }
 }
 
 /**
@@ -186,7 +190,6 @@ export function handlePaymentSuccess(packageType, orderId) {
     expireTime = dayjs().add(packageInfo.days, 'day').toISOString()
   }
 
-  // 生成支付 Token（JWT 格式）
   const tokenPayload = {
     packageType,
     expireTime,
@@ -194,10 +197,8 @@ export function handlePaymentSuccess(packageType, orderId) {
     paidAt: new Date().toISOString(),
   }
 
-  // 简单的 Base64 编码（实际应使用 JWT 库）
   const token = btoa(JSON.stringify(tokenPayload))
 
-  // 存储到 Cookie（7 天过期）
   Cookies.set('payment_token', token, { expires: 7 })
 
   return {
@@ -219,7 +220,6 @@ export function verifyPaymentStatus() {
     const decoded = JSON.parse(atob(token))
     const expireTime = decoded.expireTime
 
-    // 检查是否过期（终身套餐除外）
     if (decoded.packageType !== 'lifetime' && dayjs(expireTime).isBefore(dayjs())) {
       Cookies.remove('payment_token')
       return null

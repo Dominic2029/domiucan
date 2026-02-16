@@ -1,7 +1,7 @@
 const axios = require('axios');
 const { nowDate, uuid, getHash } = require('../utils/tools');
 
-export default async function handler(req, res) {
+module.exports = async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
@@ -105,8 +105,8 @@ export default async function handler(req, res) {
     return res.status(200).json({
       success: true,
       data: {
-        url: response.data.url, // 手机端跳转链接
-        url_qrcode: response.data.url_qrcode, // PC端二维码链接
+        url: response.data.url,
+        url_qrcode: response.data.url_qrcode,
         order_id: order_id,
       },
     });
@@ -121,4 +121,4 @@ export default async function handler(req, res) {
       error: '支付服务暂时不可用，请稍后重试',
     });
   }
-}
+};

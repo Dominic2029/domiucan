@@ -1,9 +1,6 @@
 const axios = require('axios');
 const { nowDate, uuid, getHash } = require('../utils/tools');
 
-// 数据库操作示例(你需要根据实际情况实现)
-// const db = require('../utils/database');
-
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -38,20 +35,10 @@ export default async function handler(req, res) {
       });
     }
 
-    const BASE_URL = process.env.VERCEL_URL 
-      ? `https://${process.env.VERCEL_URL}` 
-      : (process.env.BASE_URL || 'http://localhost:3000');
+    const BASE_URL = process.env.BASE_URL || 
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
 
-    // TODO: 将订单保存到数据库
-    // await db.createOrder({
-    //   order_id,
-    //   amount,
-    //   package_type,
-    //   status: 'pending',
-    //   created_at: new Date()
-    // });
-
-    // 构建支付参数
+    // 构建支付参数（严格按照虎皮椒文档）
     const params = {
       version: '1.1',
       appid: APPID,
@@ -60,10 +47,10 @@ export default async function handler(req, res) {
       title: title,
       time: nowDate(),
       notify_url: `${BASE_URL}/api/wxnotify`,
+      return_url: return_url || `${BASE_URL}/payment/result?order_id=${order_id}`,
       nonce_str: uuid(),
-      type: 'WAP',
-      wap_url: return_url || BASE_URL,
-      wap_name: '支付',
+      plugins: 'aiblogtoearn',
+      attach: JSON.stringify({ package_type, order_id }),
     };
 
     // 生成签名
@@ -75,7 +62,13 @@ export default async function handler(req, res) {
       hash,
     });
 
-    console.log('发起支付请求:', { order_id, amount, title });
+    console.log('发起支付请求:', { 
+      order_id, 
+      amount, 
+      title,
+      notify_url: params.notify_url,
+      return_url: params.return_url
+    });
 
     const response = await axios.post(
       'https://api.xunhupay.com/payment/do.html',
@@ -84,9 +77,11 @@ export default async function handler(req, res) {
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
         },
-        timeout: 10000, // 10秒超时
+        timeout: 10000,
       }
     );
+
+    console.log('虎皮椒响应:', response.data);
 
     // 检查虎皮椒返回结果
     if (response.data.errcode !== 0) {
@@ -97,16 +92,30 @@ export default async function handler(req, res) {
       });
     }
 
+    // 验证返回签名
+    const returnHash = getHash(response.data, APP_SECRET);
+    if (returnHash !== response.data.hash) {
+      console.error('返回签名验证失败');
+      return res.status(500).json({
+        success: false,
+        error: '支付响应签名验证失败',
+      });
+    }
+
     return res.status(200).json({
       success: true,
       data: {
-        url: response.data.url,
+        url: response.data.url, // 手机端跳转链接
+        url_qrcode: response.data.url_qrcode, // PC端二维码链接
         order_id: order_id,
       },
     });
 
   } catch (error) {
     console.error('支付请求失败:', error.message);
+    if (error.response) {
+      console.error('错误响应:', error.response.data);
+    }
     return res.status(500).json({
       success: false,
       error: '支付服务暂时不可用，请稍后重试',

@@ -27,6 +27,8 @@ module.exports = async function handler(req, res) {
     // 从环境变量获取配置
     const APPID = process.env.XUNHU_APPID;
     const APP_SECRET = process.env.XUNHU_APP_SECRET;
+    // 支付网关URL（可配置备用）
+    const PAYMENT_GATEWAY = process.env.XUNHU_GATEWAY_URL || 'https://api.xunhupay.com/payment/do.html';
     
     if (!APPID || !APP_SECRET) {
       console.error('虎皮椒配置缺失');
@@ -38,7 +40,7 @@ module.exports = async function handler(req, res) {
     const BASE_URL = process.env.BASE_URL || 
       (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000');
 
-    // 构建支付参数（严格按照虎皮椒文档）
+    // 构建支付参数
     const params = {
       version: '1.1',
       appid: APPID,
@@ -63,15 +65,14 @@ module.exports = async function handler(req, res) {
     });
 
     console.log('发起支付请求:', { 
+      gateway: PAYMENT_GATEWAY,
       order_id, 
       amount, 
-      title,
-      notify_url: params.notify_url,
-      return_url: params.return_url
+      title
     });
 
     const response = await axios.post(
-      'https://api.xunhupay.com/payment/do.html',
+      PAYMENT_GATEWAY,  // 使用可配置的网关
       requestParams,
       {
         headers: {
@@ -122,3 +123,18 @@ module.exports = async function handler(req, res) {
     });
   }
 };
+```
+
+### Vercel 环境变量配置
+
+在 Vercel 添加第四个环境变量（可选）：
+```
+XUNHU_APPID = 你的虎皮椒APPID
+XUNHU_APP_SECRET = 你的虎皮椒密钥  
+BASE_URL = https://www.domiucan.online
+XUNHU_GATEWAY_URL = https://api.xunhupay.com/payment/do.html
+```
+
+如果主网关不可用，可以改为：
+```
+XUNHU_GATEWAY_URL = https://api.dpweixin.com/payment/do.html
